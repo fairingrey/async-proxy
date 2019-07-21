@@ -10,7 +10,6 @@ use tokio::codec::{FramedRead, LinesCodec};
 use tokio::io::{AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::runtime::current_thread;
-use tokio::sync::lock::Lock;
 
 fn main() -> io::Result<()> {
     // load .env keys
@@ -43,10 +42,10 @@ async fn proxy(addr: SocketAddr, remote_addr: SocketAddr) -> io::Result<()> {
 
     loop {
         // Asynchronously wait for an inbound socket.
-        let (mut client_stream, _) = listener.accept().await?;
+        let (client_stream, _) = listener.accept().await?;
 
         // Once an inbound connection is initiated, open a tcp connection to the server.
-        let mut server_stream = TcpStream::connect(&remote_addr).await?;
+        let server_stream = TcpStream::connect(&remote_addr).await?;
 
         // And this is where much of the magic of this server happens. We
         // crucially want all clients to make progress concurrently, rather than
@@ -71,8 +70,8 @@ async fn handle_streams(
     mut server_stream: TcpStream,
 ) -> io::Result<()> {
     // Split both of these streams into their respective read/write handles.
-    let (mut client_read, mut client_write) = client_stream.split_mut();
-    let (mut server_read, mut server_write) = server_stream.split_mut();
+    let (client_read, mut client_write) = client_stream.split_mut();
+    let (server_read, mut server_write) = server_stream.split_mut();
 
     // Wrap TcpStream Read handles around a FramedRead stream transport.
     // These will not require a lock since neither of them are shared between tasks.
@@ -110,24 +109,30 @@ async fn handle_streams(
 
 async fn client_handle_line<W>(
     msg: String,
-    mut server_write: &mut W,
-    mut client_write: &mut W,
+    server_write: &mut W,
+    _client_write: &mut W,
 ) -> io::Result<()>
 where
     W: AsyncWrite + Unpin,
 {
     // TODO: process message that was sent from client
-    server_write.write_all(msg.as_ref()).await
+    server_write.write_all(msg.as_ref()).await?;
+
+    // The newline here is to indicate the end of the message
+    server_write.write_all(b"\n").await
 }
 
 async fn server_handle_line<W>(
     msg: String,
-    mut server_write: &mut W,
-    mut client_write: &mut W,
+    _server_write: &mut W,
+    client_write: &mut W,
 ) -> io::Result<()>
 where
     W: AsyncWrite + Unpin,
 {
     // TODO: process message that was sent from server
-    client_write.write_all(msg.as_ref()).await
+    client_write.write_all(msg.as_ref()).await?;
+
+    // The newline here is to indicate the end of the message
+    client_write.write_all(b"\n").await
 }
