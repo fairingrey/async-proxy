@@ -42,10 +42,22 @@ async fn proxy(addr: SocketAddr, remote_addr: SocketAddr) -> io::Result<()> {
 
     loop {
         // Asynchronously wait for an inbound socket.
-        let (client_stream, _) = listener.accept().await?;
+        let client_stream = match listener.accept().await {
+            Ok((stream, _peer_addr)) => stream,
+            Err(e) => {
+                eprintln!("Error connecting to client: {:?}", e);
+                continue;
+            }
+        };
 
         // Once an inbound connection is initiated, open a tcp connection to the server.
-        let server_stream = TcpStream::connect(&remote_addr).await?;
+        let server_stream = match TcpStream::connect(&remote_addr).await {
+            Ok(stream) => stream,
+            Err(e) => {
+                eprintln!("Error connecting to server: {:?}", e);
+                continue;
+            }
+        };
 
         // And this is where much of the magic of this server happens. We
         // crucially want all clients to make progress concurrently, rather than
